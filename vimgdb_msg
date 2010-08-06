@@ -1,0 +1,25 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+use Socket;
+
+my $PORT = 'vimgdb.soc';
+my $line;
+
+socket(SOCK, PF_UNIX, SOCK_STREAM, 0) || die "socket: $!";
+
+connect(SOCK, sockaddr_un($PORT)) || die "connect: $!";
+
+select(SOCK);  $| = 1;
+
+print @ARGV, "\n\n";
+
+select(STDOUT);  $| = 1;
+
+while(defined($line = <SOCK>)) 
+{
+	print $line;
+}
+
+close(SOCK);

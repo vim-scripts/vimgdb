@@ -1,11 +1,17 @@
-#!perl
+#!/usr/bin/perl
 
 use warnings;
 use strict;
+use Socket;
+use Carp;
+
 use POSIX qw(tmpnam);
+
+my $SOCK_NAME = 'vimgdb.soc';
 
 my $VIM_EXE = 'vim';
 my $GEN_LOG = 0;
+my $START_VIM = 1;
 
 my $fname  = "sureshkumar";
 my $lname  = "manimuthu";
@@ -13,31 +19,24 @@ my $domine = "gmail";
 my $suffix = "com";
 my $ERROR_FILE = "vimgdb.err";
 
-print "\nvimgdb 0.1 (send your feedbacks to $fname.$lname\@$domine.$suffix)\n\n";
+print "\nvimgdb 1.1 (send your feedbacks to $fname.$lname\@$domine.$suffix)\n\n";
 
 if(@ARGV < 1)
 {
-	print STDERR "Must specify the executable file name\n";
-	exit -1;
+	if($START_VIM == 0)
+	{
+		exec($VIM_EXE, ' -c "runtime misc/vimgdb_tcp.vim" -c \'call Gdb_interf_init()\'');
+	}
+	else
+	{
+		printf STDERR "Please specify the exe file\n";
+	}
 }
 
-my $in_fifo = tmpnam(); # name of communication pipe for input
-my $out_fifo = tmpnam(); # name of communication pipe for output
 my $gdb_task;
 my $msg_task;
 
-print "Creating FIFOs $in_fifo $out_fifo\n";
-
-# create fifo - some systems have mkfifo and some mknod
-if(system("mkfifo -m 600 $in_fifo") && system("mknod -m 600 $in_fifo p"))
-{
-	die "Unable to create $in_fifo\n";
-}
-
-if(system("mkfifo -m 600 $out_fifo") && system("mknod -m 600 $out_fifo p"))
-{
-	die "Unable to create $out_fifo\n";
-}
+print "Setup PIMES\n";
 
 pipe(FROM_VIM, TO_GDB);  # setup pipes for communication
 pipe(FROM_GDB, TO_VIM);
@@ -62,9 +61,14 @@ if($gdb_task == 0)
 	select(TO_GDB);    $| = 1; # make unbuffered
 	select(STDOUT);    $| = 1; # make unbuffered
 
-	exec("gdb", "-f", "-quiet", @ARGV);
+	if(system("gdb", "-f", "-q", "--args", @ARGV) != 0)
+	{
+		print STDERR "GDB Init Error !!!\n";
 
-	die("GDB Init Error !!!");
+		kill(15, getppid());
+	}
+
+	exit -1;
 }
 
 print "Staring Message Task\n";
@@ -76,11 +80,8 @@ unless(defined($msg_task = fork()))
 
 if($msg_task == 0)
 {
-	# print "MSG Task\n";
 	close FROM_GDB;
 	close TO_GDB;
-	my $first_time = 1;
-	my $line;
 
 	if($GEN_LOG)
 	{
@@ -92,63 +93,95 @@ if($msg_task == 0)
 
     print TO_VIM "set prompt (gdb)\\n\n";
 
-	while(1)
+	while(<FROM_VIM>)
 	{
-		if(!$first_time)
+		chomp();
+		if(/^\(gdb\)/ || /^The program is running\.  Exit anyway/)
 		{
-			unless(open(OUT,">", $out_fifo))
-			{
-				die "opening $out_fifo failed";
-			}
-			select(OUT);    $| = 1;
+			last;
 		}
+	}
 
-		while(<FROM_VIM>)
+	socket(Server, PF_UNIX,SOCK_STREAM, 0) || die "socket: $!";
+
+	unlink($SOCK_NAME);
+
+	bind(Server, sockaddr_un($SOCK_NAME)) || die "bind: $!";
+
+	listen(Server, 1) || die "listen: $!";
+
+	while(accept(Client,Server))
+	{
+		select(Client);  $| = 1;
+
+		while(1)
 		{
-			chomp();
-			if($GEN_LOG)
+			my $line = <Client>;
+
+			if(!defined($line))
 			{
-				print LOGFILE ">> ", $_, "\n";
+				exit -1;
 			}
-			if(!$first_time)
-			{
-				print OUT $_, "\n";
-			}
-			if(/^\(gdb\)/ || /^The program is running\.  Exit anyway/)
+
+			if($line =~ /^$/)
 			{
 				last;
 			}
-		}
-		if(!$first_time)
-		{
-			close(OUT);
+
+			chomp($line);
+
+			if($GEN_LOG)
+			{
+				print LOGFILE "<<", $line, "\n";
+			}
+
+			print TO_VIM $line, "\n";
+
+			while(1)
+			{
+				my $gdb_line = <FROM_VIM>;
+				if(!defined($gdb_line))
+				{
+					exit -1;
+				}
+
+				chomp($gdb_line);
+
+				if($GEN_LOG)
+				{
+					print LOGFILE ">> ", $gdb_line, "\n";
+				}
+
+				print Client $gdb_line, "\n";
+
+				if($gdb_line =~ /^The program is running\.  Exit anyway/)
+				{
+					exit -1;
+				}
+
+				if($gdb_line =~ /^\(gdb\)/)
+				{
+					last;
+				}
+			}
 		}
 
-		unless(open(IN,"<", $in_fifo))
-		{
-			die "opening $in_fifo failed";
-		}
-
-		$line = <IN>;
-		chomp($line);
-		if($GEN_LOG)
-		{
-			print LOGFILE "<<", $line, "\n";
-		}
-		print TO_VIM $line, "\n";
-		$first_time = 0;
+		close(Client);
 	}
 
-	die "Exiting msg task";
+	exit -1;
 }
 
-print "Staring VIM\n";
+if($START_VIM)
+{
+	print "Staring VIM\n";
 
-system($VIM_EXE . ' -c "runtime misc/vimgdb.vim" -c \'call Gdb_interf_init("' . $in_fifo . '","'. $out_fifo .'")\'');
+	system($VIM_EXE . ' -c "runtime misc/vimgdb.vim" -c "call Gdb_interf_init()"');
 
-print TO_VIM "quit\n";
+	print TO_VIM "quit\n";
 
-kill(15, $gdb_task, $msg_task);
+	kill(15, $gdb_task, $msg_task);
+}
 
 while(wait() != -1)
 {
@@ -162,8 +195,6 @@ if(open(OUT, "<", $ERROR_FILE))
 	}
 }
 
-print "Deleting FIFOs\n";
-
-unlink ($in_fifo);
-unlink ($out_fifo);
 unlink ($ERROR_FILE);
+
+unlink ($SOCK_NAME);

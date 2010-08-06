@@ -14,13 +14,12 @@ endif
 
 let loaded_vimgdb = 1
 let s:vimgdb_running = 0
-let s:infifo = ""
-let s:outfifo = ""
 let s:gdb_win_hight = 10
 let s:gdb_buf_name = "__GDB_WINDOW__"
 let s:cur_line_id = 9999
 let s:prv_line_id = 9998
 let s:max_break_point = 0
+let s:gdb_client = "perl ~/tools/vimgdb_msg"
 
 " This used to be in Gdb_interf_init, but older vims crashed on it
 highlight DebugBreak guibg=darkred guifg=white ctermbg=darkred ctermfg=white
@@ -29,14 +28,7 @@ sign define breakpoint linehl=DebugBreak
 sign define current linehl=DebugStop
 
 " Get ready for communication
-function! Gdb_interf_init(infifo, outfifo)
-	if s:infifo != "" || s:outfifo != ""
-		echo "Already debugging"
-		return
-	endif
-
-	let s:infifo = a:infifo
-	let s:outfifo = a:outfifo
+function! Gdb_interf_init()
 
 	call s:Gdb_shortcuts()
 
@@ -70,7 +62,8 @@ function! Gdb_interf_init(infifo, outfifo)
     augroup end
 
     inoremap <buffer> <silent> <CR> <ESC>o<ESC>:call <SID>Gdb_command(getline(line(".")-1))<CR>
-	nnoremap <buffer> <silent> : <C-W>p:
+	inoremap <buffer> <silent> <TAB> <C-P>
+	"nnoremap <buffer> <silent> : <C-W>p:
 
 	start
 	let s:vimgdb_running = 1
@@ -100,8 +93,6 @@ function s:Gdb_interf_close()
 	let s:vimgdb_running = 0
 	sign unplace *
 	let s:Breakpoint = {}
-	let s:infifo = ""
-	let s:outfifo = ""
 	let s:cur_line_id = 9999
 	let s:prv_line_id = 9998
 
@@ -130,7 +121,7 @@ function s:Gdb_Disp_Line(file, line)
 			endif
 			execute 'e +set\ nomodifiable '.a:file
 		else
-			execute 'b '.a:file
+			execute 'b ' . bufname(a:file)
 		endif
 	endif
 
@@ -143,8 +134,8 @@ endfunction
 function s:Gdb_Bpt(id, file, line)
 	call s:Gdb_Disp_Line(a:file, a:line)
 	execute "sign unplace ". a:id
-	execute "sign place " .  a:id ." name=breakpoint line=".a:line." file=".a:file
-	let s:BptList_{a:id}_file = a:file
+	execute "sign place " .  a:id ." name=breakpoint line=".a:line." buffer=".bufnr(a:file)
+	let s:BptList_{a:id}_file = bufname(a:file)
 	let s:BptList_{a:id}_line = a:line
 	if a:id > s:max_break_point
 		let s:max_break_point = a:id
@@ -192,8 +183,9 @@ function s:Gdb_command(cmd)
 	let gdb_win = bufwinnr(s:gdb_buf_name)
 
 	let out_count = 0
-	silent exec ":redir >>".s:infifo ."|echon \"".a:cmd."\n\"|redir END "
-	let lines = system("cat " . s:outfifo)
+
+	let lines = system(s:gdb_client . " \"" . a:cmd . "\"")
+
 	let index = 0
 	let length = strlen(lines)
 	while index < length
@@ -281,4 +273,5 @@ function s:Gdb_shortcuts()
 	nmap <silent> <F8>	 :call <SID>Gdb_command("next")<CR>
 	nmap <silent> <F5> 	 :call <SID>Gdb_command("continue")<CR>
 	nmap <silent> <C-P>	 :call <SID>Gdb_command("print <C-R><C-W>")<CR> 
+	vmap <silent> <C-P>	 "vy:call <SID>Gdb_command("print <C-R>v")<CR>
 endfunction
