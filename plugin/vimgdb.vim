@@ -19,7 +19,7 @@ let s:gdb_buf_name = "__GDB_WINDOW__"
 let s:cur_line_id = 9999
 let s:prv_line_id = 9998
 let s:max_break_point = 0
-let s:gdb_client = "perl ~/tools/vimgdb_msg"
+let s:gdb_client = "vimgdb_msg"
 
 " This used to be in Gdb_interf_init, but older vims crashed on it
 highlight DebugBreak guibg=darkred guifg=white ctermbg=darkred ctermfg=white

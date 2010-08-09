@@ -19,7 +19,7 @@ my $domine = "gmail";
 my $suffix = "com";
 my $ERROR_FILE = "vimgdb.err";
 
-print "\nvimgdb 1.1 (send your feedbacks to $fname.$lname\@$domine.$suffix)\n\n";
+print "\nvimgdb 1.2 (send your feedbacks to $fname.$lname\@$domine.$suffix)\n\n";
 
 if(@ARGV < 1)
 {
